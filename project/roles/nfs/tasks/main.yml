@@ -1,0 +1,87 @@
+---
+# tasks file for roles/nfs
+
+# TASK 6
+# tasks file for roles/nfs
+- name: Install server package
+  ansible.builtin.apt:
+    pkg:
+      - nfs-kernel-server
+    update_cache: true
+  # the pkg has to be installed only on the nfs_server
+  when: inventory_hostname in groups['nfs_server']
+  become: true
+
+- name: Install client package
+  ansible.builtin.apt:
+    pkg:
+      - nfs-common
+    update_cache: true
+  # the pkg has to be installed only on the nfs_client
+  when: inventory_hostname in groups['nfs_client']
+  become: true
+
+- name: Enable nfs server
+  ansible.builtin.service:
+    name: nfs-kernel-server
+    state: started
+  when: inventory_hostname in groups['nfs_server']
+  become: true
+
+# TASK 7
+- name: Create the shared /data directory
+  ansible.builtin.file:
+    path: /data
+    state: directory
+    mode: '0777'
+  become: true
+
+# BASIC VERSION
+# --------------
+# - name: Export /data directory in nfs server for multiple clients
+#  lineinfile:
+#      path: /etc/exports
+#      state: present
+#      line: "/data {{ groups['nfs_client'][0] }}(rw,no_root_squash,no_subtree_check)"
+#  when: inventory_hostname in groups['nfs_server']
+#  become: yes
+
+# TASK 7 EXTENDED VERSION
+# -----------------------
+# we have to loop when we have to target multiple clients at once
+
+- name: Export /data directory in nfs server for multiple clients
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    state: present
+    line: "/data {{ hostvars[item].ansible_eth1.ipv4.address }}(rw,no_root_squash,no_subtree_check)"
+  become: true
+  when: inventory_hostname in groups['nfs_server']
+  loop: "{{ groups['nfs_client'] }}"
+
+- name: Update fstab to mount /data in nfs client
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    state: present
+    # line (templated) to add to /etc/fstab (file with mount points)
+    line: "{{ hostvars[groups['nfs_server'][0]].ansible_eth1.ipv4.address }}:/data /data nfs defaults 0 0"
+  # execute only on NFS clients condition
+  when: inventory_hostname in groups['nfs_client']
+  become: true
+
+# reloads the exported file systems list on the NFS server (if is server)
+- name: Reload exportfs
+  ansible.builtin.command: exportfs -var
+  become: true
+  when: inventory_hostname in groups['nfs_server']
+  changed_when: false
+
+# takes from the source (server) of the mount and mounts on client at specified path
+- name: Mount /data on nfs client
+  ansible.posix.mount:
+    path: /data
+    state: mounted
+    fstype: nfs
+    src: "{{ hostvars[groups['nfs_server'][0]].ansible_eth1.ipv4.address }}:/data"
+  when: inventory_hostname in groups['nfs_client']
+  become: true

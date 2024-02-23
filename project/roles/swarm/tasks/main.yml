@@ -1,0 +1,54 @@
+---
+# tasks file for roles/swarm
+- name: Install Docker SDK for python
+  ansible.builtin.apt:
+    pkg: # we do need py3!
+      - python3-docker
+  become: true
+
+# TASK 4
+- name: Check/init swarm
+  community.docker.docker_swarm:
+    state: present
+    advertise_addr: eth0
+  register: swarm # register the output of the task in swarm var
+  # the manager node will be the first in the swarm_manager group
+  when: inventory_hostname in groups['swarm_manager']
+  become: true # privilege escalation
+
+# TASK 5 (VERSIONE BASIC)
+# - name: join worker
+#  docker_swarm:
+#    state: join
+#    advertise_addr: eth0
+    # we saved the output of the previous task in swarm var
+    # let's use it to join workers to the manager node!
+#    join_token: "{{ hostvars[groups['swarm_manager'][0]]['swarm']['swarm_facts']['JoinTokens']['Worker'] }}"
+#    # this specifies the address of the manager node (the first in the swarm manager group)
+#    remote_addrs: "{{ groups['swarm_manager'][0] }}"
+#  when: inventory_hostname in groups['swarm_worker']
+#  become: true
+
+# TASK 5 PURPLE (SCALABLE VERSION)
+- name: Join worker nodes to the Swarm
+  community.docker.docker_swarm:
+    state: join
+    advertise_addr: eth0
+    # we saved the output of the previous task in swarm var
+    # let's use it to join workers to the manager node!
+    join_token: "{{ hostvars[item]['swarm']['swarm_facts']['JoinTokens']['Worker'] }}"
+    remote_addrs: "{{ item }}"
+  when: inventory_hostname in groups['swarm_worker']
+  become: true
+  # loop over the swarm_manager group to join all the workers to the swarm (item is the placeholder for the current element of the loop)
+  loop: "{{ groups['swarm_manager'] }}"
+
+# MODIFICATION TO /etc/hosts TO MAKE HTTPS SERVICES REACHABLE BY ALL THE NODES
+# THIS ONLY WORKS WITH ONE MANAGER, OTHERWISE WE NEED ANOTHER WAY TO OBTAIN TRAEFIK'S ADDRESS
+- name: Correct /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "(.*?{{ groups['swarm_manager'][0] }})"
+    line: \g<1> auth.vcc.local
+    backrefs: true
+  become: true

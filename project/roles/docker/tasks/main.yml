@@ -1,0 +1,48 @@
+---
+# tasks file for roles/docker
+
+# TASK 1
+- name: Add Docker apt repository key.
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    # we need dest for the signed-by option in the next task
+    dest: /etc/apt/trusted.gpg.d/docker.asc
+    mode: '0644'
+    force: true
+  become: true
+
+- name: Get DEB architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: our_architecture
+  # Ensures this task doesn't report a change when it actually doesn't make any changes
+  changed_when: false
+
+# TASK 2
+- name: Add Docker source
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ our_architecture.stdout }}, signed-by=/etc/apt/trusted.gpg.d/docker.asc] \
+    https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    # is default. We can decide to omit it but it's good practice to keep it
+    state: present
+  become: true
+
+# TASK 3
+- name: Install Docker and docker compose plugin
+  ansible.builtin.apt:
+    pkg:
+      - docker-ce # docker community edition
+      - docker-ce-cli # docker command line interface
+      - containerd.io # containerd daemon for docker
+      - docker-compose-plugin
+    update_cache: true # ensure apt-get update is run
+  become: true
+
+- name: Add vagrant user to group docker
+  ansible.builtin.user:
+    name: vagrant
+    groups: docker
+    append: true
+  become: true
+
+- name: Reset ssh connection
+  ansible.builtin.meta: reset_connection
